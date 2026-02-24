@@ -1,13 +1,11 @@
 import os
 import time
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 
 def wait_for_downloads(download_dir, timeout=60):
     """Espera hasta que no haya archivos temporales de descarga (.crdownload)"""
@@ -47,7 +45,7 @@ def main():
     chrome_options.add_experimental_option("prefs", prefs)
 
     print("Iniciando navegador...")
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    driver = webdriver.Chrome(options=chrome_options)
     wait = WebDriverWait(driver, 15)
 
     try:
