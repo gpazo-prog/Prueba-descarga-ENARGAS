@@ -32,13 +32,18 @@ def main():
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     
+    # Preferencias de descarga ultra-agresivas
     prefs = {
         "download.default_directory": download_dir,
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
-        "safebrowsing.enabled": True,
+        "safebrowsing.enabled": False, # A veces bloquea archivos .xls
+        "profile.default_content_settings.popups": 0,
+        "profile.default_content_settings.automatic_downloads": 1,
+        "profile.content_settings.exceptions.automatic_downloads.*.setting": 1,
     }
     chrome_options.add_experimental_option("prefs", prefs)
+    chrome_options.add_argument("--allow-running-insecure-content")
 
     print("Iniciando Chrome...")
     service = Service(ChromeDriverManager().install())
@@ -58,49 +63,52 @@ def main():
         driver.get(url)
         
         driver.save_screenshot("inicio_pagina.png")
-        print("Captura de pantalla inicial guardada.")
 
-        print("Buscando selector de tipo de consulta...")
+        print("Seleccionando Tipo de Consulta...")
         tipo_select = wait.until(EC.presence_of_element_located((By.ID, "tipo-consulta-gnc")))
         Select(tipo_select).select_by_value("5;2")
-        print("Tipo de consulta seleccionado (5;2).")
-        time.sleep(3)
+        time.sleep(4) # Espera generosa para AJAX
 
-        print("Buscando selector de periodo...")
+        print("Seleccionando Periodo...")
         periodo_select = wait.until(EC.presence_of_element_located((By.ID, "periodo")))
-        
-        # Verificar si 2026 existe
-        options = [opt.get_attribute("value") for opt in Select(periodo_select).options]
-        print(f"Años disponibles: {options}")
-        
-        if "2026" in options:
-            Select(periodo_select).select_by_value("2026")
-            print("Año 2026 seleccionado.")
-        else:
-            print("ADVERTENCIA: 2026 no encontrado, seleccionando el más reciente.")
-            Select(periodo_select).select_by_index(1)
-            
-        time.sleep(3)
+        Select(periodo_select).select_by_value("2026")
+        time.sleep(4) # Espera generosa para AJAX
 
         nombres_cuadros = {"1": "Conversiones", "2": "Desmontajes", "3": "Revisiones", "4": "Modificaciones", "5": "Revisiones Cil.", "6": "Cilindro CRPC"}
         
         for valor_cuadro, nombre_cuadro in nombres_cuadros.items():
-            print(f"Intentando descargar cuadro {valor_cuadro}: {nombre_cuadro}...")
+            print(f"--- Cuadro {valor_cuadro}: {nombre_cuadro} ---")
             try:
-                select_cuadro_element = wait.until(EC.presence_of_element_located((By.XPATH, "//select[option[@value='1']]")))
+                # Localizar el select de cuadros
+                select_cuadro_element = wait.until(EC.visibility_of_element_located((By.XPATH, "//select[option[@value='1']]")))
                 Select(select_cuadro_element).select_by_value(valor_cuadro)
-                time.sleep(2)
+                print(f"Seleccionado cuadro {valor_cuadro} en el menú.")
+                time.sleep(3) # Tiempo para que el JS del sitio actualice el botón
 
+                # Esperar a que el botón sea clickeable y no esté oscurecido
                 btn_xls = wait.until(EC.element_to_be_clickable((By.ID, "btn-ver-xls")))
+                
+                # Scroll al botón para asegurar visibilidad
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn_xls)
+                time.sleep(1)
+
+                print("Haciendo clic en el botón de descarga...")
                 driver.execute_script("arguments[0].click();", btn_xls)
                 
-                if wait_for_downloads(download_dir, archivos_descargados + 1):
+                if wait_for_downloads(download_dir, archivos_descargados + 1, timeout=45):
                     archivos_descargados += 1
-                    print(f"EXITO: {nombre_cuadro} descargado.")
+                    print(f"EXITO: {nombre_cuadro} descargado correctamente.")
                 else:
-                    print(f"ERROR: No se detectó descarga para {nombre_cuadro}.")
+                    print(f"ERROR: El archivo de {nombre_cuadro} no apareció en la carpeta.")
+                    driver.save_screenshot(f"error_descarga_{valor_cuadro}.png")
+                
+                time.sleep(2) # Pausa entre descargas
+
             except Exception as e:
                 print(f"Fallo en cuadro {nombre_cuadro}: {str(e)}")
+                driver.save_screenshot(f"fallo_cuadro_{valor_cuadro}.png")
+                # Intentar continuar con el siguiente cuadro
+                continue
 
     except Exception as e:
         print(f"ERROR CRITICO: {str(e)}")
