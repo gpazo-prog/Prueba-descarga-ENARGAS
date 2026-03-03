@@ -1,37 +1,25 @@
 name: Descargar Estadísticas ENARGAS
-
-on: 
+on:
   workflow_dispatch:
 
 jobs:
   descargar-excel:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout del repositorio
-        uses: actions/checkout@v4
-
-      - name: Configurar Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: Instalar dependencias de Python
+      - run: pip install selenium webdriver-manager
+      - name: Instalar Xvfb y Libs
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      # NUEVO PASO: Instalar el monitor virtual en el servidor de GitHub
-      - name: Instalar Xvfb (Monitor Virtual)
-        run: sudo apt-get update && sudo apt-get install -y xvfb
-
-      # NUEVO COMANDO: Ejecutar Python a través de la pantalla virtual
-      - name: Ejecutar Script de Descarga
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python script_enargas.py
-
-      - name: Subir archivos Excel descargados como Artefactos
-        uses: actions/upload-artifact@v4
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2
+      - name: Ejecutar con Xvfb
+        run: |
+          mkdir -p descargas_gnc
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python script_enargas.py
+      - uses: actions/upload-artifact@v4
         with:
-          name: Archivos-GNC-2026
+          name: Archivos-GNC
           path: descargas_gnc/*.xls
-          retention-days: 7
