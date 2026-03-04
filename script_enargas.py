@@ -30,93 +30,102 @@ def main():
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
+    
+    # USER-AGENT REAL: Engañar al servidor para que crea que es Windows
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+    
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     
-    # Preferencias de descarga ultra-agresivas
+    # Preferencias de descarga
     prefs = {
         "download.default_directory": download_dir,
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
-        "safebrowsing.enabled": False, # A veces bloquea archivos .xls
+        "safebrowsing.enabled": False,
         "profile.default_content_settings.popups": 0,
         "profile.default_content_settings.automatic_downloads": 1,
-        "profile.content_settings.exceptions.automatic_downloads.*.setting": 1,
     }
     chrome_options.add_experimental_option("prefs", prefs)
-    chrome_options.add_argument("--allow-running-insecure-content")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
 
-    print("Iniciando Chrome...")
+    print("Iniciando Chrome con User-Agent de Windows...")
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
     
-    # Ocultar navigator.webdriver
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    })
+    # Eliminar rastro de WebDriver
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-    wait = WebDriverWait(driver, 30)
+    wait = WebDriverWait(driver, 40)
     archivos_descargados = 0
     
-    try:
+    def preparar_pagina():
         url = "https://www.enargas.gov.ar/secciones/gas-natural-comprimido/estadisticas.php"
-        print(f"Navegando a {url}...")
+        print(f"Preparando página: {url}")
         driver.get(url)
+        time.sleep(5)
         
-        driver.save_screenshot("inicio_pagina.png")
-
         print("Seleccionando Tipo de Consulta...")
-        tipo_select = wait.until(EC.presence_of_element_located((By.ID, "tipo-consulta-gnc")))
-        Select(tipo_select).select_by_value("5;2")
-        time.sleep(4) # Espera generosa para AJAX
+        tipo = wait.until(EC.element_to_be_clickable((By.ID, "tipo-consulta-gnc")))
+        Select(tipo).select_by_value("5;2")
+        time.sleep(4)
 
-        print("Seleccionando Periodo...")
-        periodo_select = wait.until(EC.presence_of_element_located((By.ID, "periodo")))
-        Select(periodo_select).select_by_value("2026")
-        time.sleep(4) # Espera generosa para AJAX
+        print("Seleccionando Año 2026...")
+        periodo = wait.until(EC.element_to_be_clickable((By.ID, "periodo")))
+        Select(periodo).select_by_value("2026")
+        time.sleep(4)
 
+    try:
+        preparar_pagina()
         nombres_cuadros = {"1": "Conversiones", "2": "Desmontajes", "3": "Revisiones", "4": "Modificaciones", "5": "Revisiones Cil.", "6": "Cilindro CRPC"}
         
         for valor_cuadro, nombre_cuadro in nombres_cuadros.items():
-            print(f"--- Cuadro {valor_cuadro}: {nombre_cuadro} ---")
+            print(f"
+--- Iniciando: {nombre_cuadro} (ID: {valor_cuadro}) ---")
+            
             try:
-                # Localizar el select de cuadros
-                select_cuadro_element = wait.until(EC.visibility_of_element_located((By.XPATH, "//select[option[@value='1']]")))
-                Select(select_cuadro_element).select_by_value(valor_cuadro)
-                print(f"Seleccionado cuadro {valor_cuadro} en el menú.")
-                time.sleep(3) # Tiempo para que el JS del sitio actualice el botón
-
-                # Esperar a que el botón sea clickeable y no esté oscurecido
+                # Intentamos localizar el selector de cuadros
+                try:
+                    sel_element = wait.until(EC.presence_of_element_located((By.XPATH, "//select[option[@value='1']]")))
+                    Select(sel_element).select_by_value(valor_cuadro)
+                except:
+                    print("DOM no responde, refrescando página...")
+                    preparar_pagina()
+                    sel_element = wait.until(EC.presence_of_element_located((By.XPATH, "//select[option[@value='1']]")))
+                    Select(sel_element).select_by_value(valor_cuadro)
+                
+                time.sleep(3)
+                
                 btn_xls = wait.until(EC.element_to_be_clickable((By.ID, "btn-ver-xls")))
-                
-                # Scroll al botón para asegurar visibilidad
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn_xls)
-                time.sleep(1)
+                time.sleep(2)
 
-                print("Haciendo clic en el botón de descarga...")
-                driver.execute_script("arguments[0].click();", btn_xls)
+                print(f"Clic en descarga para {nombre_cuadro}...")
+                from selenium.webdriver.common.action_chains import ActionChains
+                actions = ActionChains(driver)
+                actions.move_to_element(btn_xls).click().perform()
                 
-                if wait_for_downloads(download_dir, archivos_descargados + 1, timeout=45):
+                if wait_for_downloads(download_dir, archivos_descargados + 1, timeout=50):
                     archivos_descargados += 1
-                    print(f"EXITO: {nombre_cuadro} descargado correctamente.")
+                    print(f"ÉXITO: {nombre_cuadro} guardado.")
                 else:
-                    print(f"ERROR: El archivo de {nombre_cuadro} no apareció en la carpeta.")
+                    print(f"FALLO: El servidor no inició la descarga de {nombre_cuadro}.")
                     driver.save_screenshot(f"error_descarga_{valor_cuadro}.png")
-                
-                time.sleep(2) # Pausa entre descargas
+                    preparar_pagina() # Reset para el siguiente
 
             except Exception as e:
-                print(f"Fallo en cuadro {nombre_cuadro}: {str(e)}")
-                driver.save_screenshot(f"fallo_cuadro_{valor_cuadro}.png")
-                # Intentar continuar con el siguiente cuadro
-                continue
+                print(f"Error procesando {nombre_cuadro}: {str(e)}")
+                driver.save_screenshot(f"fallo_excepcion_{valor_cuadro}.png")
+                preparar_pagina()
 
     except Exception as e:
-        print(f"ERROR CRITICO: {str(e)}")
-        driver.save_screenshot("error_critico.png")
+        print(f"ERROR GENERAL: {str(e)}")
+        driver.save_screenshot("error_general.png")
     finally:
         driver.quit()
-        print(f"Fin del proceso. Total: {archivos_descargados}")
-        if archivos_descargados == 0:
+        print(f"
+Resumen: {archivos_descargados}/6 archivos descargados.")
+        if archivos_descargados < 6:
             exit(1)
 
 if __name__ == '__main__':
