@@ -48,9 +48,19 @@ def main():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
 
-    print("Iniciando Chrome con User-Agent de Windows...")
+    print("Iniciando Chrome con User-Agent de Windows y comandos CDP...")
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
+    
+    # --- COMANDOS CDP: LA CLAVE PARA DESBLOQUEAR DESCARGAS EN CI ---
+    driver.execute_cdp_cmd("Page.setDownloadBehavior", {
+        "behavior": "allow",
+        "downloadPath": download_dir
+    })
+    driver.execute_cdp_cmd("Browser.setDownloadBehavior", {
+        "behavior": "allow",
+        "downloadPath": download_dir
+    })
     
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
@@ -61,17 +71,17 @@ def main():
         url = "https://www.enargas.gov.ar/secciones/gas-natural-comprimido/estadisticas.php"
         print(f"Preparando página: {url}")
         driver.get(url)
-        time.sleep(5)
+        time.sleep(6)
         
         print("Seleccionando Tipo de Consulta...")
         tipo = wait.until(EC.element_to_be_clickable((By.ID, "tipo-consulta-gnc")))
         Select(tipo).select_by_value("5;2")
-        time.sleep(4)
+        time.sleep(5)
 
         print("Seleccionando Año 2026...")
         periodo = wait.until(EC.element_to_be_clickable((By.ID, "periodo")))
         Select(periodo).select_by_value("2026")
-        time.sleep(4)
+        time.sleep(5)
 
     try:
         preparar_pagina()
@@ -90,17 +100,21 @@ def main():
                     sel_element = wait.until(EC.presence_of_element_located((By.XPATH, "//select[option[@value='1']]")))
                     Select(sel_element).select_by_value(valor_cuadro)
                 
-                time.sleep(3)
+                time.sleep(4)
                 
                 btn_xls = wait.until(EC.element_to_be_clickable((By.ID, "btn-ver-xls")))
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn_xls)
                 time.sleep(2)
 
                 print(f"Clic en descarga para {nombre_cuadro}...")
+                # Triple intento: JS y ActionChains
+                driver.execute_script("arguments[0].click();", btn_xls)
+                
+                from selenium.webdriver.common.keys import Keys
                 actions = ActionChains(driver)
                 actions.move_to_element(btn_xls).click().perform()
                 
-                if wait_for_downloads(download_dir, archivos_descargados + 1, timeout=50):
+                if wait_for_downloads(download_dir, archivos_descargados + 1, timeout=60):
                     archivos_descargados += 1
                     print(f"ÉXITO: {nombre_cuadro} guardado.")
                 else:
@@ -118,7 +132,7 @@ def main():
         driver.save_screenshot("error_general.png")
     finally:
         driver.quit()
-        print(f"\nResumen: {archivos_descargados}/6 archivos descargados.")
+        print(f"\nResumen Final: {archivos_descargados}/6 archivos descargados.")
         if archivos_descargados < 6:
             exit(1)
 
