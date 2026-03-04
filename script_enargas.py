@@ -7,6 +7,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 
 def wait_for_downloads(download_dir, expected_count, timeout=60):
     for _ in range(timeout):
@@ -31,12 +32,10 @@ def main():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
     
-    # USER-AGENT REAL: Engañar al servidor para que crea que es Windows
+    # USER-AGENT REAL
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-    
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     
-    # Preferencias de descarga
     prefs = {
         "download.default_directory": download_dir,
         "download.prompt_for_download": False,
@@ -53,7 +52,6 @@ def main():
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
     
-    # Eliminar rastro de WebDriver
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
     wait = WebDriverWait(driver, 40)
@@ -80,11 +78,9 @@ def main():
         nombres_cuadros = {"1": "Conversiones", "2": "Desmontajes", "3": "Revisiones", "4": "Modificaciones", "5": "Revisiones Cil.", "6": "Cilindro CRPC"}
         
         for valor_cuadro, nombre_cuadro in nombres_cuadros.items():
-            print(f"
---- Iniciando: {nombre_cuadro} (ID: {valor_cuadro}) ---")
+            print(f"\n--- Iniciando: {nombre_cuadro} (ID: {valor_cuadro}) ---")
             
             try:
-                # Intentamos localizar el selector de cuadros
                 try:
                     sel_element = wait.until(EC.presence_of_element_located((By.XPATH, "//select[option[@value='1']]")))
                     Select(sel_element).select_by_value(valor_cuadro)
@@ -101,7 +97,6 @@ def main():
                 time.sleep(2)
 
                 print(f"Clic en descarga para {nombre_cuadro}...")
-                from selenium.webdriver.common.action_chains import ActionChains
                 actions = ActionChains(driver)
                 actions.move_to_element(btn_xls).click().perform()
                 
@@ -111,7 +106,7 @@ def main():
                 else:
                     print(f"FALLO: El servidor no inició la descarga de {nombre_cuadro}.")
                     driver.save_screenshot(f"error_descarga_{valor_cuadro}.png")
-                    preparar_pagina() # Reset para el siguiente
+                    preparar_pagina()
 
             except Exception as e:
                 print(f"Error procesando {nombre_cuadro}: {str(e)}")
@@ -123,8 +118,7 @@ def main():
         driver.save_screenshot("error_general.png")
     finally:
         driver.quit()
-        print(f"
-Resumen: {archivos_descargados}/6 archivos descargados.")
+        print(f"\nResumen: {archivos_descargados}/6 archivos descargados.")
         if archivos_descargados < 6:
             exit(1)
 
