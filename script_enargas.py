@@ -28,7 +28,7 @@ def main():
     archivos_ok = 0
     
     try:
-        url = "https://www.enargas.gov.ar/secciones/gas-natural-comprimido/estadisticas.php"
+        url = "https://www.enargas.gob.ar/secciones/gas-natural-comprimido/estadisticas.php"
         driver.get(url)
         time.sleep(5)
         
