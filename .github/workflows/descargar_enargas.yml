@@ -20,8 +20,11 @@ jobs:
           mkdir -p descargas_gnc
           xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python script_enargas.py
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: Archivos-y-Debug
           path: |
             descargas_gnc/*.xls
             *.png
+            *.html
+            *.log
