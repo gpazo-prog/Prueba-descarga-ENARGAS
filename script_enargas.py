@@ -44,25 +44,41 @@ def main():
         # Intentar clickear el botón de consulta para activar la sesión/token
         print("Intentando activar consulta...")
         try:
-            # Intentar por ID o por texto
-            btn = driver.find_element(By.ID, "enviar-consulta-gnc")
-            btn.click()
-            print("✓ Consulta activada.")
-            time.sleep(5)
-        except:
-            print("! No se encontró botón 'enviar-consulta-gnc', intentando continuar...")
+            # Intentar por ID, por texto o por clase
+            btn = None
+            try:
+                btn = driver.find_element(By.ID, "enviar-consulta-gnc")
+            except:
+                try:
+                    btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Consultar')]")
+                except:
+                    btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+            
+            if btn:
+                driver.execute_script("arguments[0].scrollIntoView();", btn)
+                time.sleep(1)
+                btn.click()
+                print("✓ Consulta activada.")
+                time.sleep(5)
+            else:
+                print("! No se encontró botón de consulta.")
+        except Exception as e:
+            print(f"! Error al intentar activar consulta: {e}")
 
         # Intentar extraer el token del formulario con reintentos
         token = ""
-        for _ in range(5):
+        for _ in range(10):
             try:
+                # Buscar en todo el documento
                 token_el = driver.find_element(By.NAME, "token")
                 token = token_el.get_attribute("value")
                 if token:
                     print(f"✓ Token encontrado: {token[:10]}...")
                     break
             except:
-                time.sleep(1)
+                # Scroll para forzar carga si es necesario
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
         
         if not token:
             # Búsqueda desesperada en el HTML
@@ -72,7 +88,10 @@ def main():
                 token = match.group(1)
                 print(f"✓ Token encontrado en HTML: {token[:10]}...")
             else:
-                print("✗ No se encontró el campo 'token'.")
+                print("✗ No se encontró el campo 'token'. Guardando HTML para debug.")
+                with open("debug_no_token.html", "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
+                driver.save_screenshot("error_no_token.png")
 
         nombres_cuadros = {"1": "Conversiones", "2": "Desmontajes", "3": "Revisiones", "4": "Modificaciones", "5": "Revisiones Cil.", "6": "Cilindro CRPC"}
         
