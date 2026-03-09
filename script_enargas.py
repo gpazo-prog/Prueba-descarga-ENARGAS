@@ -31,30 +31,53 @@ def main():
         url = "https://www.enargas.gov.ar/secciones/gas-natural-comprimido/estadisticas.php"
         driver.get(url)
         time.sleep(5)
+        
+        # Guardar captura inicial para diagnóstico
+        driver.save_screenshot("estado_inicial.png")
 
-        print("Configurando filtros...")
+        print("Configurando filtros y buscando token...")
         Select(wait.until(EC.presence_of_element_located((By.ID, "tipo-consulta-gnc")))).select_by_value("5;2")
         time.sleep(2)
         Select(wait.until(EC.presence_of_element_located((By.ID, "periodo")))).select_by_value("2026")
         time.sleep(2)
 
+        # Intentar extraer el token del formulario
+        try:
+            token = driver.find_element(By.NAME, "token").get_attribute("value")
+            print(f"✓ Token encontrado: {token[:10]}...")
+        except:
+            print("✗ No se encontró el campo 'token'. Intentando sin él...")
+            token = ""
+
         nombres_cuadros = {"1": "Conversiones", "2": "Desmontajes", "3": "Revisiones", "4": "Modificaciones", "5": "Revisiones Cil.", "6": "Cilindro CRPC"}
         
-        # SCRIPT DE JS PARA CAPTURAR EL EXCEL EN MEMORIA
+        # SCRIPT DE JS ACTUALIZADO CON LA NUEVA URL Y PARÁMETROS
         js_download_script = """
         var callback = arguments[arguments.length - 1];
-        var formData = new FormData();
-        formData.append('tipo-consulta-gnc', '5;2');
-        formData.append('periodo', '2026');
-        formData.append('cuadro', arguments[0]);
-        formData.append('btn-ver-xls', 'Ver XLS');
+        var token = arguments[1];
+        var cuadro = arguments[0];
+        
+        var params = new URLSearchParams();
+        params.append('tipo-consulta-gnc', '5;2');
+        params.append('cuadro', cuadro);
+        params.append('periodo', '2026');
+        params.append('desarrollo', '0');
+        params.append('Excel', '1');
+        params.append('token', token);
+        params.append('action', 'sicgnc_consulta_estadisticas');
 
-        fetch(window.location.href, {
+        // Nueva URL descubierta
+        var exportUrl = 'https://www.enargas.gob.ar/secciones/gas-natural-comprimido/exportar-datos-operativos-gnc-xls-pdf-n.php';
+
+        fetch(exportUrl, {
             method: 'POST',
-            body: formData
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: params.toString()
         })
         .then(response => {
-            if (!response.ok) throw new Error('Network response was not ok');
+            if (!response.ok) throw new Error('Status: ' + response.status);
             return response.blob();
         })
         .then(blob => {
@@ -68,19 +91,21 @@ def main():
         """
 
         for valor_cuadro, nombre_cuadro in nombres_cuadros.items():
-            print(f"Extrayendo {nombre_cuadro}...")
-            
-            # Ejecutamos el script asíncrono y esperamos el base64
-            base64_data = driver.execute_async_script(js_download_script, valor_cuadro)
+            print(f"Intentando extraer {nombre_cuadro}...")
+            base64_data = driver.execute_async_script(js_download_script, valor_cuadro, token)
             
             if base64_data.startswith("ERROR"):
-                print(f"✗ Fallo en JS: {base64_data}")
+                print(f"✗ Error en JS: {base64_data}")
                 continue
 
             excel_bytes = base64.b64decode(base64_data)
             
-            if len(excel_bytes) < 5000:
-                print(f"✗ El servidor devolvió HTML en lugar de Excel para {nombre_cuadro}")
+            # DIAGNÓSTICO: Si es pequeño, probablemente sea HTML
+            if len(excel_bytes) < 10000:
+                print(f"⚠ Contenido sospechoso para {nombre_cuadro} ({len(excel_bytes)} bytes). Guardando log...")
+                with open(f"debug_{valor_cuadro}.html", "wb") as f:
+                    f.write(excel_bytes)
+                driver.save_screenshot(f"error_{valor_cuadro}.png")
                 continue
 
             file_path = os.path.join(download_dir, f"{nombre_cuadro}.xls")
@@ -91,10 +116,14 @@ def main():
             print(f"✓ {nombre_cuadro} guardado ({len(excel_bytes)} bytes).")
             time.sleep(1)
 
+    except Exception as e:
+        print(f"FATAL ERROR: {e}")
+        driver.save_screenshot("fatal_error.png")
     finally:
         driver.quit()
-        print(f"\nResumen Final: {archivos_ok}/6")
+        print(f"\nResumen: {archivos_ok}/6 archivos descargados.")
         if archivos_ok < 6:
+            print("REVISA LOS ARCHIVOS .png Y .html GENERADOS PARA VER EL BLOQUEO.")
             exit(1)
 
 if __name__ == '__main__':
