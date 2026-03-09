@@ -34,61 +34,110 @@ def main():
         
         # Guardar captura inicial para diagnóstico
         driver.save_screenshot("estado_inicial.png")
+        with open("debug_inicial.html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
+
+        print("Listando elementos para diagnóstico...")
+        try:
+            inputs = driver.find_elements(By.TAG_NAME, "input")
+            for i in inputs:
+                print(f"  - Input: name='{i.get_attribute('name')}', id='{i.get_attribute('id')}', type='{i.get_attribute('type')}', value='{i.get_attribute('value')[:15]}...'")
+            
+            buttons = driver.find_elements(By.TAG_NAME, "button")
+            for b in buttons:
+                print(f"  - Button: text='{b.text}', id='{b.get_attribute('id')}'")
+        except:
+            pass
 
         print("Configurando filtros...")
-        Select(wait.until(EC.presence_of_element_located((By.ID, "tipo-consulta-gnc")))).select_by_value("5;2")
-        time.sleep(2)
-        Select(wait.until(EC.presence_of_element_located((By.ID, "periodo")))).select_by_value("2026")
-        time.sleep(2)
+        try:
+            select_tipo = wait.until(EC.presence_of_element_located((By.ID, "tipo-consulta-gnc")))
+            Select(select_tipo).select_by_value("5;2")
+            print("✓ Tipo consulta seleccionado.")
+            time.sleep(2)
+            
+            select_periodo = wait.until(EC.presence_of_element_located((By.ID, "periodo")))
+            Select(select_periodo).select_by_value("2026")
+            print("✓ Periodo seleccionado.")
+            time.sleep(2)
+        except Exception as e:
+            print(f"! Error configurando filtros: {e}")
 
         # Intentar clickear el botón de consulta para activar la sesión/token
         print("Intentando activar consulta...")
         try:
-            # Intentar por ID, por texto o por clase
+            # Intentar varios selectores para el botón
+            selectors = [
+                (By.ID, "enviar-consulta-gnc"),
+                (By.XPATH, "//input[@id='enviar-consulta-gnc']"),
+                (By.XPATH, "//input[@type='button' and contains(@value, 'Consultar')]"),
+                (By.XPATH, "//button[contains(text(), 'Consultar')]"),
+                (By.CSS_SELECTOR, "input[type='button']"),
+                (By.CSS_SELECTOR, "button[type='submit']")
+            ]
+            
             btn = None
-            try:
-                btn = driver.find_element(By.ID, "enviar-consulta-gnc")
-            except:
+            for sel_type, sel_val in selectors:
                 try:
-                    btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Consultar')]")
+                    btn = driver.find_element(sel_type, sel_val)
+                    if btn:
+                        print(f"✓ Botón encontrado con: {sel_val}")
+                        break
                 except:
-                    btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+                    continue
             
             if btn:
                 driver.execute_script("arguments[0].scrollIntoView();", btn)
                 time.sleep(1)
-                btn.click()
+                driver.execute_script("arguments[0].click();", btn) # Click vía JS es más fiable
                 print("✓ Consulta activada.")
                 time.sleep(5)
             else:
-                print("! No se encontró botón de consulta.")
+                print("! No se encontró botón de consulta por ningún método.")
         except Exception as e:
-            print(f"! Error al intentar activar consulta: {e}")
+            print(f"! Error crítico al intentar activar consulta: {e}")
 
         # Intentar extraer el token del formulario con reintentos
         token = ""
+        print("Buscando token...")
         for _ in range(10):
             try:
-                # Buscar en todo el documento
+                # 1. Buscar por nombre
                 token_el = driver.find_element(By.NAME, "token")
                 token = token_el.get_attribute("value")
                 if token:
-                    print(f"✓ Token encontrado: {token[:10]}...")
+                    print(f"✓ Token encontrado por nombre: {token[:10]}...")
                     break
             except:
-                # Scroll para forzar carga si es necesario
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
+                pass
+            
+            try:
+                # 2. Buscar en cualquier input hidden que tenga un valor largo (típico de tokens)
+                hiddens = driver.find_elements(By.XPATH, "//input[@type='hidden']")
+                for h in hiddens:
+                    val = h.get_attribute("value")
+                    if val and len(val) > 20:
+                        token = val
+                        print(f"✓ Token probable encontrado en hidden: {token[:10]}...")
+                        break
+                if token: break
+            except:
+                pass
+                
+            time.sleep(2)
         
         if not token:
             # Búsqueda desesperada en el HTML
             import re
             match = re.search(r'name="token"s+value="([^"]+)"', driver.page_source)
+            if not match:
+                match = re.search(r'token["']s*:s*["']([^"']+)["']', driver.page_source)
+            
             if match:
                 token = match.group(1)
-                print(f"✓ Token encontrado en HTML: {token[:10]}...")
+                print(f"✓ Token encontrado en código fuente: {token[:10]}...")
             else:
-                print("✗ No se encontró el campo 'token'. Guardando HTML para debug.")
+                print("✗ No se encontró el campo 'token'. Guardando estado final.")
                 with open("debug_no_token.html", "w", encoding="utf-8") as f:
                     f.write(driver.page_source)
                 driver.save_screenshot("error_no_token.png")
