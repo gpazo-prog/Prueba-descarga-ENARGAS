@@ -129,9 +129,9 @@ def main():
         if not token:
             # Búsqueda desesperada en el HTML
             import re
-            match = re.search(r'name="token"s+value="([^"]+)"', driver.page_source)
+            match = re.search(r'name="token"\s+value="([^"]+)"', driver.page_source)
             if not match:
-                match = re.search(r'token["']s*:s*["']([^"']+)["']', driver.page_source)
+                match = re.search(r"""token['"]\s*:\s*['"]([^'"]+)['"]""", driver.page_source)
             
             if match:
                 token = match.group(1)
