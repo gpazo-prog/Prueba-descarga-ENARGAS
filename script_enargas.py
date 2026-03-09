@@ -29,126 +29,98 @@ def main():
     
     try:
         url = "https://www.enargas.gob.ar/secciones/gas-natural-comprimido/estadisticas.php"
+        print(f"Navegando a {url}...")
         driver.get(url)
         time.sleep(5)
         
-        # Guardar captura inicial para diagnóstico
-        driver.save_screenshot("estado_inicial.png")
-        with open("debug_inicial.html", "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
+        # Función de diagnóstico
+        def debug_screen(step_name):
+            print(f"--- DIAGNÓSTICO: {step_name} ---")
+            driver.save_screenshot(f"step_{step_name}.png")
 
-        print("Listando elementos para diagnóstico...")
-        try:
-            inputs = driver.find_elements(By.TAG_NAME, "input")
-            for i in inputs:
-                print(f"  - Input: name='{i.get_attribute('name')}', id='{i.get_attribute('id')}', type='{i.get_attribute('type')}', value='{i.get_attribute('value')[:15]}...'")
-            
-            buttons = driver.find_elements(By.TAG_NAME, "button")
-            for b in buttons:
-                print(f"  - Button: text='{b.text}', id='{b.get_attribute('id')}'")
-        except:
-            pass
+        debug_screen("01_inicio")
+
+        # Manejo de Iframes (el formulario suele estar dentro)
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        for frame in iframes:
+            src = frame.get_attribute("src") or ""
+            if "consulta" in src or "gnc" in src:
+                print(f"✓ Cambiando al iframe: {src}")
+                driver.switch_to.frame(frame)
+                debug_screen("02_dentro_iframe")
+                break
 
         print("Configurando filtros...")
         try:
+            # 1. Selección de Tipo
             select_tipo = wait.until(EC.presence_of_element_located((By.ID, "tipo-consulta-gnc")))
             Select(select_tipo).select_by_value("5;2")
-            print("✓ Tipo consulta seleccionado.")
-            time.sleep(2)
+            print("✓ Tipo seleccionado (5;2)")
+            time.sleep(1)
             
+            # 2. Selección de Periodo
             select_periodo = wait.until(EC.presence_of_element_located((By.ID, "periodo")))
             Select(select_periodo).select_by_value("2026")
-            print("✓ Periodo seleccionado.")
-            time.sleep(2)
-        except Exception as e:
-            print(f"! Error configurando filtros: {e}")
+            print("✓ Periodo seleccionado (2026)")
+            time.sleep(1)
+            
+            # 3. Selección de Cuadro
+            try:
+                select_cuadro = driver.find_element(By.ID, "cuadro")
+                Select(select_cuadro).select_by_value("1")
+                print("✓ Cuadro inicial seleccionado (1)")
+            except:
+                print("! No se encontró selector de cuadro por ID 'cuadro'.")
 
-        # Intentar clickear el botón de consulta para activar la sesión/token
-        print("Intentando activar consulta...")
+        except Exception as e:
+            print(f"! Error en filtros: {e}")
+
+        # Localizar el botón Ver Excel (ID estático confirmado: btn-ver-xls)
+        print("Localizando botón 'Ver Excel'...")
         try:
-            # Intentar varios selectores para el botón
-            selectors = [
-                (By.ID, "enviar-consulta-gnc"),
-                (By.XPATH, "//input[@id='enviar-consulta-gnc']"),
-                (By.XPATH, "//input[@type='button' and contains(@value, 'Consultar')]"),
-                (By.XPATH, "//button[contains(text(), 'Consultar')]"),
-                (By.CSS_SELECTOR, "input[type='button']"),
-                (By.CSS_SELECTOR, "button[type='submit']")
-            ]
+            btn_excel = wait.until(EC.visibility_of_element_located((By.ID, "btn-ver-xls")))
+            print("✓ Botón 'btn-ver-xls' encontrado.")
             
-            btn = None
-            for sel_type, sel_val in selectors:
-                try:
-                    btn = driver.find_element(sel_type, sel_val)
-                    if btn:
-                        print(f"✓ Botón encontrado con: {sel_val}")
-                        break
-                except:
-                    continue
-            
-            if btn:
-                driver.execute_script("arguments[0].scrollIntoView();", btn)
-                time.sleep(1)
-                driver.execute_script("arguments[0].click();", btn) # Click vía JS es más fiable
-                print("✓ Consulta activada.")
-                time.sleep(5)
-            else:
-                print("! No se encontró botón de consulta por ningún método.")
+            # Hacemos scroll y un clic suave para asegurar que la sesión/token se refresquen si es necesario
+            driver.execute_script("arguments[0].scrollIntoView();", btn_excel)
+            time.sleep(1)
+            # No hacemos clic real para evitar el diálogo de "Guardar como", 
+            # solo nos aseguramos de que el token esté presente en el DOM.
         except Exception as e:
-            print(f"! Error crítico al intentar activar consulta: {e}")
+            print(f"! Error localizando botón: {e}")
 
-        # Intentar extraer el token del formulario con reintentos
+        # Extraer Token del input hidden confirmado
         token = ""
-        print("Buscando token...")
-        for _ in range(10):
-            try:
-                # 1. Buscar por nombre
-                token_el = driver.find_element(By.NAME, "token")
-                token = token_el.get_attribute("value")
-                if token:
-                    print(f"✓ Token encontrado por nombre: {token[:10]}...")
-                    break
-            except:
-                pass
-            
-            try:
-                # 2. Buscar en cualquier input hidden que tenga un valor largo (típico de tokens)
-                hiddens = driver.find_elements(By.XPATH, "//input[@type='hidden']")
-                for h in hiddens:
-                    val = h.get_attribute("value")
-                    if val and len(val) > 20:
-                        token = val
-                        print(f"✓ Token probable encontrado en hidden: {token[:10]}...")
-                        break
-                if token: break
-            except:
-                pass
-                
-            time.sleep(2)
-        
-        if not token:
-            # Búsqueda desesperada en el HTML
-            import re
-            match = re.search(r'name="token"\s+value="([^"]+)"', driver.page_source)
-            if not match:
-                match = re.search(r"""token['"]\s*:\s*['"]([^'"]+)['"]""", driver.page_source)
-            
-            if match:
-                token = match.group(1)
-                print(f"✓ Token encontrado en código fuente: {token[:10]}...")
-            else:
-                print("✗ No se encontró el campo 'token'. Guardando estado final.")
-                with open("debug_no_token.html", "w", encoding="utf-8") as f:
-                    f.write(driver.page_source)
-                driver.save_screenshot("error_no_token.png")
+        try:
+            token_el = driver.find_element(By.NAME, "token")
+            token = token_el.get_attribute("value")
+            if token:
+                print(f"✓ Token extraído con éxito: {token[:15]}...")
+        except:
+            print("! No se encontró input 'token' por nombre. Intentando vía JS...")
+            token = driver.execute_script("return document.getElementsByName('token')[0]?.value || '';")
 
-        nombres_cuadros = {"1": "Conversiones", "2": "Desmontajes", "3": "Revisiones", "4": "Modificaciones", "5": "Revisiones Cil.", "6": "Cilindro CRPC"}
+        if not token:
+            print("✗ ERROR CRÍTICO: No se pudo obtener el token de sesión.")
+            driver.save_screenshot("error_token.png")
+            exit(1)
+
+        # Mapeo de cuadros para la descarga masiva
+        nombres_cuadros = {
+            "1": "Conversiones", 
+            "2": "Desmontajes", 
+            "3": "Revisiones", 
+            "4": "Modificaciones", 
+            "5": "Revisiones Cil.", 
+            "6": "Cilindro CRPC"
+        }
         
-        # SCRIPT DE JS ACTUALIZADO CON URL RELATIVA PARA EVITAR CORS
+        # Script de descarga asíncrona (Fetch Tunneling)
+        # Este script emula la función GenerarConsultaEstadisticasGNC_N('Excel')
         js_download_script = """
         var callback = arguments[arguments.length - 1];
-        var token = arguments[1];
         var cuadro = arguments[0];
+        var token = arguments[1];
         
         var params = new URLSearchParams();
         params.append('tipo-consulta-gnc', '5;2');
@@ -159,55 +131,41 @@ def main():
         params.append('token', token);
         params.append('action', 'sicgnc_consulta_estadisticas');
 
-        // Usamos URL absoluta con gob.ar para asegurar consistencia
-        var exportUrl = 'https://www.enargas.gob.ar/secciones/gas-natural-comprimido/exportar-datos-operativos-gnc-xls-pdf-n.php';
-
-        fetch(exportUrl, {
+        fetch('https://www.enargas.gob.ar/secciones/gas-natural-comprimido/exportar-datos-operativos-gnc-xls-pdf-n.php', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params.toString()
         })
-        .then(response => {
-            if (!response.ok) throw new Error('Status: ' + response.status);
-            return response.blob();
+        .then(r => {
+            if(!r.ok) throw new Error('Error en red: ' + r.status);
+            return r.blob();
         })
         .then(blob => {
             var reader = new FileReader();
-            reader.onloadend = function() {
-                callback(reader.result.split(',')[1]);
-            };
+            reader.onloadend = () => callback(reader.result.split(',')[1]);
             reader.readAsDataURL(blob);
         })
-        .catch(err => callback("ERROR: " + err));
+        .catch(e => callback("ERROR: " + e));
         """
 
-        for valor_cuadro, nombre_cuadro in nombres_cuadros.items():
-            print(f"Intentando extraer {nombre_cuadro}...")
-            base64_data = driver.execute_async_script(js_download_script, valor_cuadro, token)
+        for val, nom in nombres_cuadros.items():
+            print(f"Procesando: {nom} (Cuadro {val})...")
+            # Ejecutamos el túnel JS para obtener los bytes del archivo
+            b64_data = driver.execute_async_script(js_download_script, val, token)
             
-            if base64_data.startswith("ERROR"):
-                print(f"✗ Error en JS: {base64_data}")
-                continue
-
-            excel_bytes = base64.b64decode(base64_data)
-            
-            # DIAGNÓSTICO: Si es pequeño, probablemente sea HTML
-            if len(excel_bytes) < 10000:
-                print(f"⚠ Contenido sospechoso para {nombre_cuadro} ({len(excel_bytes)} bytes). Guardando log...")
-                with open(f"debug_{valor_cuadro}.html", "wb") as f:
-                    f.write(excel_bytes)
-                driver.save_screenshot(f"error_{valor_cuadro}.png")
-                continue
-
-            file_path = os.path.join(download_dir, f"{nombre_cuadro}.xls")
-            with open(file_path, "wb") as f:
-                f.write(excel_bytes)
-            
-            archivos_ok += 1
-            print(f"✓ {nombre_cuadro} guardado ({len(excel_bytes)} bytes).")
-            time.sleep(1)
+            if b64_data.startswith("ERROR"):
+                print(f"  ✗ Error en descarga: {b64_data}")
+            else:
+                file_bytes = base64.b64decode(b64_data)
+                # Si el archivo es muy pequeño, probablemente sea un error del servidor devuelto como HTML
+                if len(file_bytes) < 500:
+                    print(f"  ⚠ Archivo demasiado pequeño ({len(file_bytes)} bytes). Posible error de sesión.")
+                else:
+                    filename = f"{nom}.xls"
+                    with open(os.path.join(download_dir, filename), "wb") as f:
+                        f.write(file_bytes)
+                    print(f"  ✓ Descargado con éxito ({len(file_bytes)} bytes)")
+                    archivos_ok += 1
 
     except Exception as e:
         print(f"FATAL ERROR: {e}")
