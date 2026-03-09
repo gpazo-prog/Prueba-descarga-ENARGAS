@@ -35,23 +35,48 @@ def main():
         # Guardar captura inicial para diagnóstico
         driver.save_screenshot("estado_inicial.png")
 
-        print("Configurando filtros y buscando token...")
+        print("Configurando filtros...")
         Select(wait.until(EC.presence_of_element_located((By.ID, "tipo-consulta-gnc")))).select_by_value("5;2")
         time.sleep(2)
         Select(wait.until(EC.presence_of_element_located((By.ID, "periodo")))).select_by_value("2026")
         time.sleep(2)
 
-        # Intentar extraer el token del formulario
+        # Intentar clickear el botón de consulta para activar la sesión/token
+        print("Intentando activar consulta...")
         try:
-            token = driver.find_element(By.NAME, "token").get_attribute("value")
-            print(f"✓ Token encontrado: {token[:10]}...")
+            # Intentar por ID o por texto
+            btn = driver.find_element(By.ID, "enviar-consulta-gnc")
+            btn.click()
+            print("✓ Consulta activada.")
+            time.sleep(5)
         except:
-            print("✗ No se encontró el campo 'token'. Intentando sin él...")
-            token = ""
+            print("! No se encontró botón 'enviar-consulta-gnc', intentando continuar...")
+
+        # Intentar extraer el token del formulario con reintentos
+        token = ""
+        for _ in range(5):
+            try:
+                token_el = driver.find_element(By.NAME, "token")
+                token = token_el.get_attribute("value")
+                if token:
+                    print(f"✓ Token encontrado: {token[:10]}...")
+                    break
+            except:
+                time.sleep(1)
+        
+        if not token:
+            # Búsqueda desesperada en el HTML
+            import re
+            match = re.search(r'name="token"s+value="([^"]+)"', driver.page_source)
+            if match:
+                token = match.group(1)
+                print(f"✓ Token encontrado en HTML: {token[:10]}...")
+            else:
+                print("✗ No se encontró el campo 'token'.")
 
         nombres_cuadros = {"1": "Conversiones", "2": "Desmontajes", "3": "Revisiones", "4": "Modificaciones", "5": "Revisiones Cil.", "6": "Cilindro CRPC"}
         
-        # SCRIPT DE JS ACTUALIZADO CON LA NUEVA URL Y PARÁMETROS
+        # SCRIPT DE JS ACTUALIZADO CON URL RELATIVA PARA EVITAR CORS
         js_download_script = """
         var callback = arguments[arguments.length - 1];
         var token = arguments[1];
@@ -66,7 +91,7 @@ def main():
         params.append('token', token);
         params.append('action', 'sicgnc_consulta_estadisticas');
 
-        // Nueva URL descubierta
+        // Usamos URL absoluta con gob.ar para asegurar consistencia
         var exportUrl = 'https://www.enargas.gob.ar/secciones/gas-natural-comprimido/exportar-datos-operativos-gnc-xls-pdf-n.php';
 
         fetch(exportUrl, {
