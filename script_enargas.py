@@ -1,6 +1,6 @@
 import os
 import time
-import requests
+import base64
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -20,7 +20,7 @@ def main():
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
 
-    print("Iniciando Selenium para obtener sesión...")
+    print("Iniciando Navegador...")
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
     
@@ -32,48 +32,64 @@ def main():
         driver.get(url)
         time.sleep(5)
 
-        print("Seleccionando filtros iniciales...")
+        print("Configurando filtros...")
         Select(wait.until(EC.presence_of_element_located((By.ID, "tipo-consulta-gnc")))).select_by_value("5;2")
-        time.sleep(3)
+        time.sleep(2)
         Select(wait.until(EC.presence_of_element_located((By.ID, "periodo")))).select_by_value("2026")
-        time.sleep(3)
+        time.sleep(2)
 
-        # Extraer sesión
-        session_cookies = {c['name']: c['value'] for c in driver.get_cookies()}
-        user_agent = driver.execute_script("return navigator.userAgent")
-        
         nombres_cuadros = {"1": "Conversiones", "2": "Desmontajes", "3": "Revisiones", "4": "Modificaciones", "5": "Revisiones Cil.", "6": "Cilindro CRPC"}
         
-        for valor_cuadro, nombre_cuadro in nombres_cuadros.items():
-            print(f"Descargando {nombre_cuadro} vía Requests...")
-            
-            payload = {
-                "tipo-consulta-gnc": "5;2",
-                "periodo": "2026",
-                "cuadro": valor_cuadro,
-                "btn-ver-xls": "Ver XLS"
-            }
-            
-            headers = {
-                "User-Agent": user_agent,
-                "Referer": url,
-                "Origin": "https://www.enargas.gov.ar"
-            }
+        # SCRIPT DE JS PARA CAPTURAR EL EXCEL EN MEMORIA
+        js_download_script = """
+        var callback = arguments[arguments.length - 1];
+        var formData = new FormData();
+        formData.append('tipo-consulta-gnc', '5;2');
+        formData.append('periodo', '2026');
+        formData.append('cuadro', arguments[0]);
+        formData.append('btn-ver-xls', 'Ver XLS');
 
-            try:
-                response = requests.post(url, data=payload, cookies=session_cookies, headers=headers, timeout=30)
-                if response.status_code == 200 and len(response.content) > 1000:
-                    file_path = os.path.join(download_dir, f"{nombre_cuadro}.xls")
-                    with open(file_path, "wb") as f:
-                        f.write(response.content)
-                    archivos_ok += 1
-                    print(f"✓ {nombre_cuadro} descargado.")
-                else:
-                    print(f"✗ Error en respuesta para {nombre_cuadro}")
-            except Exception as e:
-                print(f"✗ Error en petición: {e}")
+        fetch(window.location.href, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) throw new Error('Network response was not ok');
+            return response.blob();
+        })
+        .then(blob => {
+            var reader = new FileReader();
+            reader.onloadend = function() {
+                callback(reader.result.split(',')[1]);
+            };
+            reader.readAsDataURL(blob);
+        })
+        .catch(err => callback("ERROR: " + err));
+        """
+
+        for valor_cuadro, nombre_cuadro in nombres_cuadros.items():
+            print(f"Extrayendo {nombre_cuadro}...")
             
-            time.sleep(2)
+            # Ejecutamos el script asíncrono y esperamos el base64
+            base64_data = driver.execute_async_script(js_download_script, valor_cuadro)
+            
+            if base64_data.startswith("ERROR"):
+                print(f"✗ Fallo en JS: {base64_data}")
+                continue
+
+            excel_bytes = base64.b64decode(base64_data)
+            
+            if len(excel_bytes) < 5000:
+                print(f"✗ El servidor devolvió HTML en lugar de Excel para {nombre_cuadro}")
+                continue
+
+            file_path = os.path.join(download_dir, f"{nombre_cuadro}.xls")
+            with open(file_path, "wb") as f:
+                f.write(excel_bytes)
+            
+            archivos_ok += 1
+            print(f"✓ {nombre_cuadro} guardado ({len(excel_bytes)} bytes).")
+            time.sleep(1)
 
     finally:
         driver.quit()
